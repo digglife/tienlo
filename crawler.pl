@@ -5,8 +5,12 @@ use warnings;
 
 use LWP::UserAgent;
 use HTML::TreeBuilder;
+use Data::Dumper;
+use DBI;
+use DBD::SQLite;
+use Cwd qw/abs_path getcwd/;
+use File::Spec;
 
-use Data::Dumper::AutoEncode;
 
 my $site = "http://www.mp4ba.com";
 
@@ -17,7 +21,7 @@ die "$site is not available now" unless $response->is_success;
 
 my $tree = HTML::TreeBuilder->new;
 $tree->parse($response->decoded_content);
-#$tree->parse_file('mp4ba.html');
+# $tree->parse_file('mp4ba.html');
 
 my $table = $tree->find_by_attribute('id', 'data_list');
 my @rows;
@@ -27,8 +31,9 @@ for my $tr ( $table->look_down('_tag', 'tr', sub { ! $_[0]->attr('id') }) ){
         my $text = $td->as_text;
         if ( $td->attr('style') ) {
             my $a = $td->look_down('_tag', 'a');
-            my ( $hash ) = $a->attr('href') =~ /=(.*)$/;
-            push @cols, $hash;
+            # my ( $hash ) = $a->attr('href') =~ /=(.*)$/;
+            # push @cols, $hash;
+            push @cols, $site . '/' . $a->attr('href');
             $text = $a->as_text;
         }
         $text =~ s/^\s+|\s+$//g;
@@ -39,3 +44,37 @@ for my $tr ( $table->look_down('_tag', 'tr', sub { ! $_[0]->attr('id') }) ){
 }
 
 #print Dumper($rows[0]);
+
+my $dir = abs_path(getcwd);
+my $db = File::Spec->catfile($dir, 'scroll.db');
+init_db($db) unless ( -e $db);
+
+
+sub init_db {
+    my $db_name = shift;
+
+    my $dbh = DBI->connect("dbi:SQLite:dbname=$db", "", "");
+    my @statements = ( q#
+        CREATE TABLE sites (
+            id INT PRIMARY_KEY,
+            url TEXT,
+            name TEXT
+        );
+        #,
+        q#
+        CREATE TABLE movies (
+            id INT PRIMARY KEY,
+            title TEXT,
+            resolution TEXT,
+            publish_date DATE,
+            page_url TEXT,
+            download_url TEXT,
+            is_downloaded BOOLEAN,
+            site_id INT
+        );
+        #
+    );
+
+    $dbh->do($_) for @statements;
+}
+
