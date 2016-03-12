@@ -17,27 +17,39 @@ use File::Spec;
 
 my $site = "http://www.mp4ba.com";
 
+my $dbh = get_dbh('scroll.db');
+my @last_record
+    = $dbh->selectrow_array( "SELECT page_title FROM movies "
+        . " WHERE site = '"
+        . $site
+        . "' ORDER BY id DESC LIMIT 1" );
+
+my $last_movie_title = $last_record[0];
+
 my $ua = LWP::UserAgent->new;
 $ua->agent( 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:41.0)'
         . ' Gecko/20100101 Firefox/41.0' );
+$ua->timeout(180);
 my $response = $ua->get($site);
 die "$site is not available now" unless $response->is_success;
 
 my $tree = HTML::TreeBuilder->new;
-$tree->parse( $response->decoded_content );
+# $tree->parse( $response->content );
 
-#$tree->parse_file('mp4ba.html');
+$tree->parse_file('mp4ba.html');
 
 my $table = $tree->find_by_attribute( 'id', 'data_list' );
 my @rows;
 
 for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
     my @cols;
+
+    # Acutally only the third td is valuable for me, but still loop all the tds
+    # for future use.
     for my $td ( $tr->find_by_tag_name('td') ) {
         my $text = $td->as_text;
         if ( $td->attr('style') ) {
             my $a = $td->look_down( '_tag', 'a' );
-
             # my ( $hash ) = $a->attr('href') =~ /=(.*)$/;
             # push @cols, $hash;
             push @cols, $site . '/' . $a->attr('href');
@@ -47,46 +59,28 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
         push @cols, $text;
     }
 
-    #print "@cols\n";
-    #FIFO
-    unshift @rows, \@cols;
-}
-
-#print Dumper($rows[0]);
-
-my $dbh = get_dbh('scroll.db');
-my @last_record
-    = $dbh->selectrow_array( "SELECT page_url FROM movies "
-        . " WHERE site = '"
-        . $site
-        . "' ORDER BY id LIMIT 1" );
-
-my $last_movie_title = $last_record[0];
-
-my $sth
-    = $dbh->prepare( "INSERT INTO movies "
-        . "(page_title, page_url, download_url, is_downloaded, site) "
-        . " VALUES (?, ?, ?, ?, ?)" );
-
-for my $item (@rows) {
-    print "Processing " . $item->[3] . "\n";
-    last if $last_movie_title && $last_movie_title eq $item->[2];
-    my ($hash) = $item->[2] =~ /=(.*)$/;
+    print "Processing " . $cols[3] . "\n";
+    last if $last_movie_title && $last_movie_title eq $cols[3];
+    my @status = 
+        $dbh->selectrow_array("SELECT is_downloaded from movies "
+            . "WHERE page_title = '" . $cols[3] . "'" );
+    my $is_downloaded = $status[0] ? 1 : 0;
+    next if $is_downloaded;
+    my ($hash) = $cols[2] =~ /=(.*)$/;
     my $download_url
         = "magnet:?xt=urn:btih:"
         . $hash
         . "&tr=http://bt.mp4ba.com:2710/announce";
     my ( $title, $quality )
-        = $item->[3]
+        = $cols[3]
         =~ /(.*?)\..*((?:BD|HD|TS|TC)(?:720|1080)P|DVDRIP|DVDSRC)/;
-    print "Real Title => $title \n";
+    print "Real Title => $title\n";
     my $rating        = get_douban_rating($title);
-    my $is_downloaded = 0;
+    print "RATING => $rating\n";
 
     if ( $rating > 7 && $quality =~ /(BD|HD)720p/i ) {
-
         #$status = $downloader->create_task($download_url);
-        print "This one should be DOWNLOADED:\n   "
+        print "Virtual Download The Following One:\n"
             . "$title -> ( Rating: $rating ; Quality: $quality )\n";
         
         if ($@) {
@@ -96,11 +90,24 @@ for my $item (@rows) {
             $is_downloaded = 1;
         }
     }
-    $sth->execute(
-        ( $item->[3], $item->[2], $download_url, $is_downloaded, $site ) );
+
+    @cols = ( @cols[3, 2], $download_url, $is_downloaded, $site );
+    push @rows, \@cols;
 }
 
-$dbh->finish;
+
+#print Dumper($rows[0]);
+
+my $sth
+    = $dbh->prepare( "INSERT INTO movies "
+        . "(page_title, page_url, download_url, is_downloaded, site) "
+        . " VALUES (?, ?, ?, ?, ?)" );
+
+for ( my $i = $#rows; $i >= 0; $i-- ) {
+    $sth->execute( @{$rows[$i]} );
+}
+
+$sth->finish;
 
 sub get_dbh {
     my $db_name = shift;
@@ -136,9 +143,9 @@ sub get_douban_rating {
         = "https://movie.douban.com/subject_search?search_text="
         . url_encode($title)
         . "&cat=1002";
-    my $ua = LWP::UserAgent->new;
-    $ua->agent( 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:41.0)'
-            . ' Gecko/20100101 Firefox/41.0' );
+    # my $ua = LWP::UserAgent->new;
+    # $ua->agent( 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:41.0)'
+    #         . ' Gecko/20100101 Firefox/41.0' );
     my $response = $ua->get($url);
     return unless $response->is_success;
     my $search_result = $response->content;
@@ -147,5 +154,9 @@ sub get_douban_rating {
     my @ratings
         = $tree->look_down( '_tag' => 'span', 'class' => 'rating_nums' );
     return $ratings[0]->as_text;
+}
+
+sub send_notification {
+    my ( $email, $message ) = @_;
 }
 
