@@ -1,10 +1,20 @@
-# 田螺 (Tienlo)
+# Tienlo
 
-自动下载电影。
+Download movies for me automatically.
 
-## 功能
+## Config
 
-抓取多个迅雷下载网站的信息，自动下载热门的或者自己喜欢的电影。
+```json
+{
+    "rating" : 7,
+    "quility" : "720P",
+    "xunlei" : {
+        "downloader" : "pi",
+        "username" : "user@gmail.com",
+        "password" : "pass"
+    }
+}
+```
 
 ## TODO
 
