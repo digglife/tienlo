@@ -101,6 +101,7 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
         else {
             $is_downloaded = 1;
         }
+        send_notification($config{'email'}, $title, $is_downloaded);
     }
 
     @cols = ( @cols[ 3, 2 ], $download_url, $is_downloaded, $site );
@@ -169,7 +170,15 @@ sub get_douban_rating {
 }
 
 sub send_notification {
-    my ( $email, $message ) = @_;
+    my ( $email, $title, $status ) = @_;
+    my $indicator = $status ? "INFO" : "WARN";
+    my $subject = "[$indicator] [Xunlei Remote] [$title was added to Xunlei]";
+
+    use Email::Stuffer;
+    Email::Stuffer->to($email)
+        ->from($email)
+        ->subject($subject)
+        ->send;
 }
 
 sub get_config {
