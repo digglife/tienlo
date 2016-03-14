@@ -3,9 +3,9 @@
 use strict;
 use warnings;
 
-use utf8;
+
 use LWP::UserAgent;
-use URL::Encode qw/url_encode/;
+use URL::Encode qw/url_encode_utf8/;
 use HTML::TreeBuilder;
 use Data::Dumper;
 use DBI;
@@ -14,7 +14,9 @@ use Cwd qw/abs_path getcwd/;
 use File::Spec;
 use WWW::Xunlei;
 
-$WWW::Xunlei::DEBUG = 1;
+binmode STDOUT, ":encoding(UTF-8)";
+#$WWW::Xunlei::DEBUG = 1;
+
 my $site        = "http://www.mp4ba.com";
 my $dir         = abs_path(getcwd);
 my $config_file = File::Spec->catfile( $dir, 'config.json' );
@@ -50,12 +52,14 @@ die "$site is not available now : " . $response->code
 
 my $tree = HTML::TreeBuilder->new;
 
-$tree->parse( $response->content );
+$tree->parse( $response->decoded_content );
 
 # $tree->parse_file('mp4ba.html');
 
 my $table = $tree->find_by_attribute( 'id', 'data_list' );
 my @rows;
+my %downloads;
+my %ratings;
 
 for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
     my @cols;
@@ -80,8 +84,8 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
     last if $last_movie_title && $last_movie_title eq $cols[3];
     my @status
         = $dbh->selectrow_array( "SELECT is_downloaded from movies "
-            . "WHERE page_title = '"
-            . $cols[3]
+            . "WHERE page_url = '"
+            . $cols[2]
             . "'" );
     my $is_downloaded = $status[0] ? 1 : 0;
     next if $is_downloaded;
@@ -93,28 +97,33 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
     my ( $title, $quality )
         = $cols[3] =~ /(.*?)\..*((?:BD|HD|TS|TC)(?:720|1080)P|DVDRIP|DVDSRC)/;
     print "Real Title => $title\n";
-    my $rating = get_douban_rating($title);
-    print "RATING => $rating\n";
+    unless ( $ratings{$title} ) {
+        $ratings{$title} = get_douban_rating($title);
+    }
+    print "RATING => $ratings{$title}\n";
 
-    if (   $rating > $config->{'rating'}
+    if (   $ratings{$title} >= $config->{'rating'}
         && $quality =~ /(BD|HD)$config->{'quality'}/i )
     {
-        eval { $downloader->create_task($download_url); };
+        #eval { $downloader->create_task($download_url); };
 
-        # print "Virtual Download The Following One:\n"
-        #     . "$title -> ( Rating: $rating ; Quality: $quality )\n";
+        print "Virtual Download The Following One:\n"
+            . "$title -> ( Rating: $ratings{$title} ; Quality: $quality )\n";
         if ($@) {
             next;
         }
         else {
             $is_downloaded = 1;
         }
-        send_notification( $config->{'email'}, $title, $is_downloaded );
+        $downloads{$title} = $is_downloaded;
+        #send_notification( $config->{'email'}, $title, $is_downloaded );
     }
 
     @cols = ( @cols[ 3, 2 ], $download_url, $is_downloaded, $site );
     push @rows, \@cols;
 }
+
+send_notification($config->{'email'}, %downloads) if ( %downloads );
 
 
 my $sth
@@ -126,14 +135,14 @@ for ( my $i = $#rows; $i >= 0; $i-- ) {
     $sth->execute( @{ $rows[$i] } );
 }
 
-$sth->finish;
-$dbh->disconnect;
+$dbh->commit;
+#$dbh->disconnect;
 
 sub get_dbh {
     my $db = shift;
 
-    my $dbh = DBI->connect( "dbi:SQLite:dbname=$db",
-        { RaiseError => 1, AutoCommit => 1 } );
+    my $dbh = DBI->connect( "dbi:SQLite:dbname=$db", "", "",
+        { RaiseError => 1, AutoCommit => 0 } );
 
     my $create = q#
         CREATE TABLE movies (
@@ -158,7 +167,7 @@ sub get_douban_rating {
 
     my $url
         = "https://movie.douban.com/subject_search?search_text="
-        . url_encode($title)
+        . url_encode_utf8($title)
         . "&cat=1002";
 
     my $response = $ua->get($url);
@@ -172,12 +181,21 @@ sub get_douban_rating {
 }
 
 sub send_notification {
-    my ( $email, $title, $status ) = @_;
-    my $indicator = $status ? "INFO" : "WARN";
-    my $subject = "[$indicator] [Xunlei Remote] [$title was added to Xunlei]";
-
+    my ( $email, %downloads ) = @_;
+    my $indicator = ( grep { $_ == 0 } values %downloads ) ? "WARN" : "INFO";
+    my $subject = "[$indicator] [Tienlo] [Movies Added to Xunlei Remote]";
+    my $body  = "Details:\n";
+    for ( keys %downloads ) {
+        $body .= $_ . " ...... " . ( $downloads{$_} ? "SUCC" : "FAIL" ) ."\n" ;
+    }
     use Email::Stuffer;
-    Email::Stuffer->to($email)->from($email)->subject($subject)->send;
+    my $hostname = qx(hostname -f);
+    chomp $hostname;
+    Email::Stuffer->to($email)
+        ->from("tienlo\@$hostname")
+        ->subject($subject)
+        ->text_body($body)
+        ->send;
 }
 
 sub get_config {
