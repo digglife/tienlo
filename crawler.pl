@@ -14,15 +14,23 @@ use Cwd qw/abs_path getcwd/;
 use File::Spec;
 use WWW::Xunlei;
 
-my $site   = "http://www.mp4ba.com";
-my $config = get_config('config.json');
+$WWW::Xunlei::DEBUG = 1;
+my $site        = "http://www.mp4ba.com";
+my $dir         = abs_path(getcwd);
+my $config_file = File::Spec->catfile( $dir, 'config.json' );
+my $config      = get_config($config_file);
 
-my $xunlei = WWW::Xunlei->new( $config->{'xunlei'}->{'username'},
-    $config->{'xunlei'}->{'password'} );
+my $cookie = File::Spec->catfile( $dir, 'cookie.txt' );
+my $xunlei = WWW::Xunlei->new(
+    $config->{'xunlei'}->{'username'},
+    $config->{'xunlei'}->{'password'},
+    'cookie_file' => $cookie
+);
 
 my $downloader = $xunlei->list_downloaders()->[0];
 
-my $dbh = get_dbh('scroll.db');
+my $db = File::Spec->catfile( $dir, 'scroll.db' );
+my $dbh = get_dbh($db);
 my @last_record
     = $dbh->selectrow_array( "SELECT page_title FROM movies "
         . " WHERE site = '"
@@ -35,7 +43,7 @@ my $ua = LWP::UserAgent->new;
 $ua->agent( 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:41.0)'
         . ' Gecko/20100101 Firefox/41.0' );
 
-$ua->timeout(180);
+$ua->timeout(30);
 my $response = $ua->get($site);
 die "$site is not available now : " . $response->code
     unless $response->is_success;
@@ -88,8 +96,8 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
     my $rating = get_douban_rating($title);
     print "RATING => $rating\n";
 
-    if (   $rating > $config{'rating'}
-        && $quality =~ /(BD|HD)$config{'quality'}/i )
+    if (   $rating > $config->{'rating'}
+        && $quality =~ /(BD|HD)$config->{'quality'}/i )
     {
         eval { $downloader->create_task($download_url); };
 
@@ -101,14 +109,13 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
         else {
             $is_downloaded = 1;
         }
-        send_notification($config{'email'}, $title, $is_downloaded);
+        send_notification( $config->{'email'}, $title, $is_downloaded );
     }
 
     @cols = ( @cols[ 3, 2 ], $download_url, $is_downloaded, $site );
     push @rows, \@cols;
 }
 
-#print Dumper($rows[0]);
 
 my $sth
     = $dbh->prepare( "INSERT INTO movies "
@@ -120,15 +127,13 @@ for ( my $i = $#rows; $i >= 0; $i-- ) {
 }
 
 $sth->finish;
+$dbh->disconnect;
 
 sub get_dbh {
-    my $db_name = shift;
-
-    my $dir = abs_path(getcwd);
-    my $db = File::Spec->catfile( $dir, $db_name );
+    my $db = shift;
 
     my $dbh = DBI->connect( "dbi:SQLite:dbname=$db",
-        { RaiseError => 1, AutoCommit => 0 } );
+        { RaiseError => 1, AutoCommit => 1 } );
 
     my $create = q#
         CREATE TABLE movies (
@@ -156,11 +161,8 @@ sub get_douban_rating {
         . url_encode($title)
         . "&cat=1002";
 
-    # my $ua = LWP::UserAgent->new;
-    # $ua->agent( 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:41.0)'
-    #         . ' Gecko/20100101 Firefox/41.0' );
     my $response = $ua->get($url);
-    return unless $response->is_success;
+    unless ($response->is_success) { print $response->code, "\n";return; }
     my $search_result = $response->content;
     my $tree          = HTML::TreeBuilder->new;
     $tree->parse($search_result);
@@ -175,17 +177,11 @@ sub send_notification {
     my $subject = "[$indicator] [Xunlei Remote] [$title was added to Xunlei]";
 
     use Email::Stuffer;
-    Email::Stuffer->to($email)
-        ->from($email)
-        ->subject($subject)
-        ->send;
+    Email::Stuffer->to($email)->from($email)->subject($subject)->send;
 }
 
 sub get_config {
-    my $file_name = shift;
-
-    my $dir = abs_path(getcwd);
-    my $file = File::Spec->catfile( $dir, $file_name );
+    my $file = shift;
 
     use JSON qw/decode_json/;
     open( my $fh, '<', $file ) or die "Unable to open $file: $!";
@@ -193,3 +189,4 @@ sub get_config {
     my $config = decode_json($content);
     return $config;
 }
+
