@@ -177,7 +177,8 @@ sub get_douban_rating {
     $tree->parse($search_result);
     my @ratings
         = $tree->look_down( '_tag' => 'span', 'class' => 'rating_nums' );
-    return $ratings[0]->as_text;
+    #ratings is empty if no result found.
+    return $ratings[0]->as_text if @ratings;
 }
 
 sub send_notification {
