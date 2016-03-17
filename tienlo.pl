@@ -95,7 +95,7 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
         . $hash
         . "&tr=http://bt.mp4ba.com:2710/announce";
     my ( $title, $quality )
-        = $cols[3] =~ /(.*?)\..*((?:BD|HD|TS|TC)(?:720|1080)P|DVDRIP|DVDSRC)/;
+        = $cols[3] =~ /(.*?)\..*((?:BD|HD|TS|TC)(?:\d+)P|DVDRIP|DVDSRC)/;
     print "Real Title => $title\n";
     unless ( $ratings{$title} ) {
         $ratings{$title} = get_douban_rating($title);
