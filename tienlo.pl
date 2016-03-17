@@ -96,19 +96,17 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
         . "&tr=http://bt.mp4ba.com:2710/announce";
     my ( $title, $quality )
         = $cols[3] =~ /(.*?)\..*((?:BD|HD|TS|TC)(?:\d+)P|DVDRIP|DVDSRC)/;
-    print "Real Title => $title\n";
     unless ( $ratings{$title} ) {
         $ratings{$title} = get_douban_rating($title);
     }
-    print "RATING => $ratings{$title}\n";
 
     if (   $ratings{$title} >= $config->{'rating'}
         && $quality =~ /(BD|HD)$config->{'quality'}/i )
     {
-        #eval { $downloader->create_task($download_url); };
+        eval { $downloader->create_task($download_url); };
 
-        print "Virtual Download The Following One:\n"
-            . "$title -> ( Rating: $ratings{$title} ; Quality: $quality )\n";
+        # print "Virtual Download The Following One:\n"
+        #     . "$title -> ( Rating: $ratings{$title} ; Quality: $quality )\n";
         if ($@) {
             next;
         }
