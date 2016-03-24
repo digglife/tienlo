@@ -3,7 +3,6 @@
 use strict;
 use warnings;
 
-
 use LWP::UserAgent;
 use URL::Encode qw/url_encode_utf8/;
 use HTML::TreeBuilder;
@@ -46,7 +45,24 @@ $ua->agent( 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:41.0)'
         . ' Gecko/20100101 Firefox/41.0' );
 
 $ua->timeout(30);
+# save cf_clearance cookie for passing the security protection from
+# Baidu YunJiaSu (Cloud Accelerator).
+$ua->cookie_jar({ file => $cookie });
 my $response = $ua->get($site);
+
+if (   $response->code == 503
+    && $response->decoded_content =~ /yjs-browser-verification/ )
+{
+    my $content = $response->decoded_content;
+    my $yjs_check_url = get_baidu_yjs_check_url($site, $content);
+    #print "$yjs_check_url\n";
+    sleep 5;
+    $response = $ua->get($yjs_check_url);
+    die "Unable to cheat Baidu YJS Browser Verification : " . $response->code
+        unless $response->is_success;
+    $response = $ua->get($site);
+}
+
 die "$site is not available now : " . $response->code
     unless $response->is_success;
 
@@ -96,6 +112,7 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
         . "&tr=http://bt.mp4ba.com:2710/announce";
     my ( $title, $quality )
         = $cols[3] =~ /(.*?)\..*((?:BD|HD|TS|TC)(?:\d+)P|DVDRIP|DVDSRC)/;
+
     unless ( $ratings{$title} ) {
         $ratings{$title} = get_douban_rating($title);
     }
@@ -114,6 +131,7 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
             $is_downloaded = 1;
         }
         $downloads{$title} = $is_downloaded;
+
         #send_notification( $config->{'email'}, $title, $is_downloaded );
     }
 
@@ -121,8 +139,7 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
     push @rows, \@cols;
 }
 
-send_notification($config->{'email'}, %downloads) if ( %downloads );
-
+send_notification( $config->{'email'}, %downloads ) if ( %downloads );
 
 my $sth
     = $dbh->prepare( "INSERT INTO movies "
@@ -169,12 +186,13 @@ sub get_douban_rating {
         . "&cat=1002";
 
     my $response = $ua->get($url);
-    unless ($response->is_success) { print $response->code, "\n";return; }
+    unless ( $response->is_success ) { print $response->code, "\n"; return; }
     my $search_result = $response->content;
     my $tree          = HTML::TreeBuilder->new;
     $tree->parse($search_result);
     my @ratings
         = $tree->look_down( '_tag' => 'span', 'class' => 'rating_nums' );
+
     #ratings is empty if no result found.
     return $ratings[0]->as_text if @ratings;
 }
@@ -182,10 +200,10 @@ sub get_douban_rating {
 sub send_notification {
     my ( $email, %downloads ) = @_;
     my $indicator = ( grep { $_ == 0 } values %downloads ) ? "WARN" : "INFO";
-    my $subject = "[$indicator] [Tienlo] [Movies Added to Xunlei Remote]";
-    my $body  = "Details:\n";
+    my $subject   = "[$indicator] [Tienlo] [Movies Added to Xunlei Remote]";
+    my $body      = "Details:\n";
     for ( keys %downloads ) {
-        $body .= $_ . " ...... " . ( $downloads{$_} ? "SUCC" : "FAIL" ) ."\n" ;
+        $body .= $_ . " ...... " . ( $downloads{$_} ? "SUCC" : "FAIL" ) . "\n";
     }
     use Email::Stuffer;
     my $hostname = qx(hostname -f);
@@ -207,3 +225,41 @@ sub get_config {
     return $config;
 }
 
+sub get_baidu_yjs_check_url {
+    my $site_url = shift;
+    my $content = shift;
+
+    use JE;
+    use URI;
+
+    my $uri = URI->new($site_url);
+    my $je = new JE;
+    my $tree = HTML::TreeBuilder->new;
+    $tree->parse($content);
+    #$tree->parse_file('bdsecurity.html');
+    my $js = $tree->look_down("_tag", "script");
+    $js = $js->as_HTML;
+    $js =~ s/^\<\/?script.*|^\s+\/\/.*//gm;
+    my ($first_assignment, $object, $key) =
+        $js =~ /var t,r,a,f, ((\w+)\=\{"(\w+)\"\:.*)/;
+    my ($multiple_caculation) = $js =~ /;(.*;)a\.value/;
+
+    print $first_assignment . $multiple_caculation . "\n";
+    my $final_number = $je->eval($first_assignment . $multiple_caculation);
+    my $answer = $final_number + length($uri->host);
+    my $form = $tree->look_down("_tag", "form");
+    my $jschk_url = $site_url . $form->attr('action');
+    my @inputs = $form->look_down("_tag", "input");
+    my %query;
+    for my $input ( @inputs ) {
+        $query{$input->attr("name")} = $input->attr("value");
+    }
+    $query{'jschl_answer'} = $answer;
+    #print Dumper(\%query);
+    my @params;
+    for ( keys %query ) {
+        push @params, join('=', $_, $query{$_});
+    }
+    $jschk_url .= '?' . join('&', @params);
+    return $jschk_url;
+}
