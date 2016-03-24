@@ -6,6 +6,7 @@ use warnings;
 use LWP::UserAgent;
 use URL::Encode qw/url_encode_utf8/;
 use HTML::TreeBuilder;
+use Encode qw/decode/;
 use Data::Dumper;
 use DBI;
 use DBD::SQLite;
@@ -38,7 +39,7 @@ my @last_record
         . $site
         . "' ORDER BY id DESC LIMIT 1" );
 
-my $last_movie_title = $last_record[0];
+my $last_movie_title = decode('utf8', $last_record[0]);
 
 my $ua = LWP::UserAgent->new;
 $ua->agent( 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:41.0)'
@@ -244,7 +245,7 @@ sub get_baidu_yjs_check_url {
         $js =~ /var t,r,a,f, ((\w+)\=\{"(\w+)\"\:.*)/;
     my ($multiple_caculation) = $js =~ /;(.*;)a\.value/;
 
-    print $first_assignment . $multiple_caculation . "\n";
+    #print $first_assignment . $multiple_caculation . "\n";
     my $final_number = $je->eval($first_assignment . $multiple_caculation);
     my $answer = $final_number + length($uri->host);
     my $form = $tree->look_down("_tag", "form");
