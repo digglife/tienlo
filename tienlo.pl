@@ -28,7 +28,7 @@ my $xunlei = WWW::Xunlei->new(
     'cookie_file' => $cookie
 );
 
-my $downloader = $xunlei->list_downloaders()->[0];
+my $downloader = $xunlei->get_downloader($config->{'xunlei'}->{'downloader'});
 
 my $db = File::Spec->catfile( $dir, 'scroll.db' );
 my $dbh = get_dbh($db);
