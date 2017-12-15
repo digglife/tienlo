@@ -12,6 +12,10 @@ Download movies for me automatically.
 {
     "rating" : 7,
     "quility" : "720P",
+    "email" : {
+        "username" : "user@gmail.com",
+        "password" : "pass"
+    },
     "xunlei" : {
         "downloader" : "pi",
         "username" : "user@gmail.com",
@@ -22,6 +26,6 @@ Download movies for me automatically.
 
 ## TODO
 
-1. notification( email maybe weixin)
+1. ~~notification( email maybe weixin)~~
 2. log (warnings dies)
 3. default config values

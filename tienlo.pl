@@ -140,7 +140,10 @@ for my $tr ( $table->look_down( '_tag', 'tr', sub { !$_[0]->attr('id') } ) ) {
     push @rows, \@cols;
 }
 
-send_notification( $config->{'email'}, %downloads ) if ( %downloads );
+if ( $config->{'email'} ) {
+send_notification( $config->{'email'}->{'username'}, 
+    $config->{'email'}->{'password'}, %downloads ) if ( %downloads );
+}
 
 my $sth
     = $dbh->prepare( "INSERT INTO movies "
@@ -199,20 +202,27 @@ sub get_douban_rating {
 }
 
 sub send_notification {
-    my ( $email, %downloads ) = @_;
+    my ( $email, $password, %downloads ) = @_;
     my $indicator = ( grep { $_ == 0 } values %downloads ) ? "WARN" : "INFO";
     my $subject   = "[$indicator] [Tienlo] [Movies Added to Xunlei Remote]";
     my $body      = "Details:\n";
+    my $smtp_host = join('.', 'smtp', ( split /\@/, $email )[1]);
     for ( keys %downloads ) {
         $body .= $_ . " ...... " . ( $downloads{$_} ? "SUCC" : "FAIL" ) . "\n";
     }
     use Email::Stuffer;
-    my $hostname = qx(hostname -f);
-    chomp $hostname;
+    my $smtp = Email::Sender::Transport::SMTP->new(
+        {   host => $smtp_host,
+            ssl => 1,
+            sasl_username => $email,
+            sasl_password => $password
+        }
+    );
     Email::Stuffer->to($email)
-        ->from("tienlo\@$hostname")
+        ->from($email)
         ->subject($subject)
         ->text_body($body)
+        ->transport($smtp)
         ->send;
 }
 
@@ -228,7 +238,7 @@ sub get_config {
 
 sub get_baidu_yjs_check_url {
     my $site_url = shift;
-    my $content = shift;
+    my $content  = shift;
 
     use JE;
     use URI;
